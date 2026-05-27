@@ -68,11 +68,6 @@ with col_xlsx:
         accept_multiple_files=True,
     )
 
-# Limpar resultado anterior quando o usuário troca os arquivos
-if not pdf_files or not xlsx_files:
-    st.session_state.output_bytes = None
-    st.session_state.output_messages = []
-
 # ── Botão de processamento ────────────────────────────────────────────────────
 
 if st.button(
