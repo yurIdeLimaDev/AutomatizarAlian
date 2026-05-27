@@ -16,6 +16,8 @@ import re
 import sys
 import unicodedata
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
+from numbers import Integral, Real
 from typing import List, Optional, Tuple
 
 import pandas as pd
@@ -27,12 +29,43 @@ if _PARENT_DIR not in sys.path:
     sys.path.insert(0, _PARENT_DIR)
 
 
-_APOLICE_KEYWORDS = [
+_APOLICE_EXACT_HEADERS = {
     "APOLICE",
     "N APOLICE",
-    "NUMERO DA APOLICE",
     "N DA APOLICE",
-]
+    "NUM APOLICE",
+    "NR APOLICE",
+    "NRO APOLICE",
+    "NUMERO APOLICE",
+    "NUMERO DA APOLICE",
+}
+
+_APOLICE_EXCLUDED_TERMS = {
+    "ANTERIOR",
+    "ANTIGA",
+    "CANCELADA",
+    "VENCIDA",
+}
+
+_CLIENTE_HEADERS = {
+    "CLIENTE",
+    "SEGURADO",
+    "NOME CLIENTE",
+    "NOME DO CLIENTE",
+    "CLIENTE SEGURADO",
+    "SEGURADO CLIENTE",
+    "NOME SEGURADO",
+    "NOME DO SEGURADO",
+}
+
+_VENDEDOR_HEADERS = {
+    "VENDEDOR",
+    "VEND",
+    "VENDEDOR RESPONSAVEL",
+    "RESPONSAVEL VENDA",
+    "CONSULTOR",
+    "CORRETOR",
+}
 
 # Palavras-chave normalizadas (sem acento, sem pontuacao) para identificar a
 # coluna do valor de comissao da CORRETORA.
@@ -44,7 +77,6 @@ _COM_CORRETORA_KEYWORDS = [
     "COMIS CORRETORA",
     "VALOR CORRETORA",
     "VLR CORRETORA",
-    "CORRETORA",
 ]
 
 # Palavras-chave normalizadas para identificar a coluna do valor de comissao
@@ -71,6 +103,8 @@ class XLSXRecordSuelane:
     apolice: str
     com_corretora: Optional[float]
     com_vendedor: Optional[float]
+    com_corretora_col_found: bool = True
+    com_vendedor_col_found: bool = True
 
 
 def _strip_accents_upper(text: str) -> str:
@@ -86,7 +120,65 @@ def _strip_accents_upper(text: str) -> str:
 def _normalize_apolice(raw: str) -> str:
     if not raw:
         return ""
-    return re.sub(r"[\s.\-/]", "", str(raw).strip())
+    return re.sub(r"[\s.,\-/]", "", str(raw).strip())
+
+
+def _format_decimal_apolice(value: Decimal) -> str:
+    fixed = format(value, "f")
+    if "." in fixed:
+        int_part, frac_part = fixed.split(".", 1)
+        if set(frac_part) <= {"0"}:
+            return int_part
+        return f"{int_part}.{frac_part.rstrip('0')}"
+    return fixed
+
+
+def _stringify_apolice(value) -> str:
+    """
+    Converte a celula de apolice para texto antes da normalizacao.
+
+    Evita o bug comum em que valores numericos vindos do Excel aparecem como
+    "12345.0" ou "1.2345E+5" e viram "123450" apos remover pontuacao.
+    """
+    if value is None or pd.isna(value):
+        return ""
+
+    if isinstance(value, Integral) and not isinstance(value, bool):
+        return str(value)
+
+    if isinstance(value, Real) and not isinstance(value, bool):
+        numeric = float(value)
+        if pd.isna(numeric):
+            return ""
+        try:
+            return _format_decimal_apolice(Decimal(str(numeric)))
+        except InvalidOperation:
+            return str(value).strip()
+
+    raw = str(value).strip().lstrip("'")
+    if not raw:
+        return ""
+
+    br_grouped_zero_match = re.fullmatch(r"(\d{1,3}(?:\.\d{3})+),0+", raw)
+    if br_grouped_zero_match:
+        return br_grouped_zero_match.group(1).replace(".", "")
+
+    us_grouped_zero_match = re.fullmatch(r"(\d{1,3}(?:,\d{3})+)\.0+", raw)
+    if us_grouped_zero_match:
+        return us_grouped_zero_match.group(1).replace(",", "")
+
+    decimal_zero_match = re.fullmatch(r"(\d+)[.,]0+", raw)
+    if decimal_zero_match:
+        return decimal_zero_match.group(1)
+
+    sci_match = re.fullmatch(r"[+-]?\d+(?:[.,]\d+)?[Ee][+-]?\d+", raw)
+    if sci_match:
+        try:
+            return _format_decimal_apolice(Decimal(raw.replace(",", ".")))
+        except InvalidOperation:
+            return raw
+
+    return raw
 
 
 def _parse_br_money(value) -> Optional[float]:
@@ -97,6 +189,8 @@ def _parse_br_money(value) -> Optional[float]:
     """
     if value is None:
         return None
+    if isinstance(value, bool):
+        return None
     if isinstance(value, (int, float)):
         if isinstance(value, float) and pd.isna(value):
             return None
@@ -106,24 +200,36 @@ def _parse_br_money(value) -> Optional[float]:
     if not raw or raw.upper() in {"NAN", "NONE", "-", "--"}:
         return None
 
-    # Remove simbolos comuns de moeda e espacos
+    # Remove simbolos comuns de moeda e qualquer espaco unicode.
     cleaned = re.sub(r"[Rr]\$\s*", "", raw)
-    cleaned = cleaned.replace(" ", "")
+    cleaned = re.sub(r"\s+", "", cleaned)
 
     # Detecta negativo entre parenteses (1.234,56) -> -1234.56
     negative = False
     if cleaned.startswith("(") and cleaned.endswith(")"):
         negative = True
         cleaned = cleaned[1:-1]
+    elif len(cleaned) > 1 and cleaned.endswith("-"):
+        negative = True
+        cleaned = cleaned[:-1]
 
     has_comma = "," in cleaned
     has_dot = "." in cleaned
 
     if has_comma and has_dot:
-        # Assume formato brasileiro: ponto = milhar, virgula = decimal
-        cleaned = cleaned.replace(".", "").replace(",", ".")
+        if cleaned.rfind(",") > cleaned.rfind("."):
+            # Formato brasileiro: ponto = milhar, virgula = decimal.
+            cleaned = cleaned.replace(".", "").replace(",", ".")
+        else:
+            # Formato americano textual: virgula = milhar, ponto = decimal.
+            cleaned = cleaned.replace(",", "")
     elif has_comma:
         cleaned = cleaned.replace(",", ".")
+    elif has_dot:
+        parts = cleaned.split(".")
+        if len(parts) > 1 and all(len(part) == 3 for part in parts[1:]):
+            # "1.234" em planilha brasileira normalmente eh milhar, nao decimal.
+            cleaned = "".join(parts)
     # senao mantem como esta
 
     try:
@@ -140,6 +246,43 @@ def _match_keyword(cell_norm: str, keywords: List[str]) -> bool:
         if kw in cell_norm:
             return True
     return False
+
+
+def _apolice_header_score(cell_norm: str) -> int:
+    if "APOLICE" not in cell_norm:
+        return 0
+    if any(term in cell_norm for term in _APOLICE_EXCLUDED_TERMS):
+        return 0
+    if cell_norm in _APOLICE_EXACT_HEADERS:
+        return 100
+    for header in _APOLICE_EXACT_HEADERS:
+        if header != "APOLICE" and header in cell_norm:
+            return 80
+    return 10
+
+
+def _find_header_col(
+    normalized_cells: List[str],
+    accepted_headers: set[str],
+) -> Optional[int]:
+    for col_idx, cell_norm in enumerate(normalized_cells):
+        if cell_norm in accepted_headers:
+            return col_idx
+    return None
+
+
+def _is_com_corretora_header(cell_norm: str) -> bool:
+    if "CORRETORA" not in cell_norm:
+        return False
+    if any(term in cell_norm for term in ("VEND CORRETORA", "VENDEDOR CORRETORA")):
+        return False
+    return _match_keyword(cell_norm, _COM_CORRETORA_KEYWORDS)
+
+
+def _is_com_vendedor_header(cell_norm: str) -> bool:
+    if "CORRETORA" in cell_norm:
+        return False
+    return _match_keyword(cell_norm, _COM_VENDEDOR_KEYWORDS)
 
 
 def _find_header_row(
@@ -163,13 +306,14 @@ def _find_header_row(
     for row_idx, row in df.iterrows():
         normalized_cells = [_strip_accents_upper(v) for v in row]
 
-        if "CLIENTE" not in normalized_cells or "VENDEDOR" not in normalized_cells:
+        cliente_col = _find_header_col(normalized_cells, _CLIENTE_HEADERS)
+        vendedor_col = _find_header_col(normalized_cells, _VENDEDOR_HEADERS)
+
+        if cliente_col is None or vendedor_col is None:
             continue
 
-        cliente_col = normalized_cells.index("CLIENTE")
-        vendedor_col = normalized_cells.index("VENDEDOR")
-
         apolice_col: Optional[int] = None
+        apolice_score = 0
         com_corretora_col: Optional[int] = None
         com_vendedor_col: Optional[int] = None
 
@@ -179,20 +323,16 @@ def _find_header_row(
             if col_idx in (cliente_col, vendedor_col):
                 continue
 
-            if apolice_col is None and _match_keyword(cell_norm, _APOLICE_KEYWORDS):
+            current_apolice_score = _apolice_header_score(cell_norm)
+            if current_apolice_score > apolice_score:
                 apolice_col = col_idx
-                continue
+                apolice_score = current_apolice_score
 
-            # Para COM CORRETORA: precisa conter CORRETORA (mais especifico que VEND)
-            if com_corretora_col is None and _match_keyword(
-                cell_norm, _COM_CORRETORA_KEYWORDS
-            ):
+            if com_corretora_col is None and _is_com_corretora_header(cell_norm):
                 com_corretora_col = col_idx
                 continue
 
-            if com_vendedor_col is None and _match_keyword(
-                cell_norm, _COM_VENDEDOR_KEYWORDS
-            ):
+            if com_vendedor_col is None and _is_com_vendedor_header(cell_norm):
                 com_vendedor_col = col_idx
                 continue
 
@@ -253,11 +393,7 @@ def _extract_records_from_sheet(
         if apolice_col is not None:
             apolice_val = row.iloc[apolice_col]
             if pd.notna(apolice_val):
-                if isinstance(apolice_val, float) and apolice_val.is_integer():
-                    raw_str = str(int(apolice_val))
-                else:
-                    raw_str = str(apolice_val).strip()
-                apolice_str = _normalize_apolice(raw_str)
+                apolice_str = _normalize_apolice(_stringify_apolice(apolice_val))
 
         com_corretora_val: Optional[float] = None
         if com_corretora_col is not None:
@@ -275,6 +411,8 @@ def _extract_records_from_sheet(
                 apolice=apolice_str,
                 com_corretora=com_corretora_val,
                 com_vendedor=com_vendedor_val,
+                com_corretora_col_found=com_corretora_col is not None,
+                com_vendedor_col_found=com_vendedor_col is not None,
             )
         )
 
@@ -282,7 +420,7 @@ def _extract_records_from_sheet(
     if warnings_extras:
         warning_msg = (
             f"Aba '{sheet_name}': " + ", ".join(warnings_extras) +
-            " - linhas serao marcadas para verificacao."
+            " - linhas que dependerem dessas colunas serao marcadas para verificacao."
         )
 
     return records, warning_msg

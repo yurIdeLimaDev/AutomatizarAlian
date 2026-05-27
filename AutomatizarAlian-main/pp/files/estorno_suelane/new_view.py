@@ -3,12 +3,13 @@ UI do novo fluxo (estornos Suelane).
 
 Mesma estetica do sistema antigo, mas chama o pipeline novo:
   - xlsx_parser_suelane (inclui SUELANE, extrai colunas de comissao)
-  - matcher_suelane (reaproveita matcher antigo via duck typing)
+  - matcher_suelane (usa a logica base do matcher antigo com desempate Suelane)
   - report_builder_suelane (saida com regra COM CORRETORA / COMISSAO VEND
     e marcacao laranja por motivo)
 """
 
 import os
+import hashlib
 import sys
 import tempfile
 
@@ -21,15 +22,20 @@ if _PARENT_DIR not in sys.path:
 
 from pdf_parser import extract_negative_commission_records  # noqa: E402
 
-from estorno_suelane.matcher_suelane import (  # noqa: E402
-    match_records_suelane,
-    get_valor_estorno,
-    get_coluna_origem,
+from estorno_suelane.matcher_suelane import match_records_suelane  # noqa: E402
+from estorno_suelane.report_builder_suelane import (  # noqa: E402
+    analyze_record_suelane,
+    build_report_suelane,
 )
-from estorno_suelane.report_builder_suelane import build_report_suelane  # noqa: E402
 from estorno_suelane.xlsx_parser_suelane import (  # noqa: E402
     extract_client_vendor_pairs_suelane,
 )
+
+
+def _safe_upper(value) -> str:
+    if value is None:
+        return ""
+    return str(value).upper()
 
 
 def _dedupe_pdf_records(existing, new_records):
@@ -38,7 +44,7 @@ def _dedupe_pdf_records(existing, new_records):
         existing_idx = -1
         for i, e in enumerate(existing):
             if (
-                e.segurado.upper() == rec.segurado.upper()
+                _safe_upper(e.segurado) == _safe_upper(rec.segurado)
                 and e.inicio_vig == rec.inicio_vig
             ):
                 if e.apolice == rec.apolice:
@@ -59,9 +65,47 @@ def _dedupe_pdf_records(existing, new_records):
                 existing[existing_idx] = rec
 
 
+def _spreadsheet_suffix(uploaded_file) -> str:
+    suffix = os.path.splitext(getattr(uploaded_file, "name", "") or "")[1].lower()
+    if suffix in (".xlsx", ".xls"):
+        return suffix
+    return ".xlsx"
+
+
+def _uploaded_files_signature(files) -> tuple:
+    if not files:
+        return ()
+
+    def _digest(file) -> str | None:
+        getvalue = getattr(file, "getvalue", None)
+        if not callable(getvalue):
+            return None
+        try:
+            return hashlib.sha256(getvalue()).hexdigest()
+        except Exception:
+            return None
+
+    return tuple(
+        (
+            getattr(file, "name", ""),
+            getattr(file, "size", None),
+            getattr(file, "type", ""),
+            _digest(file),
+        )
+        for file in files
+    )
+
+
+def _uploaded_file_bytes(uploaded_file) -> bytes:
+    getvalue = getattr(uploaded_file, "getvalue", None)
+    if callable(getvalue):
+        return getvalue()
+    return uploaded_file.read()
+
+
 def render() -> None:
     st.title("Estornos Suelane")
-    st.markdown("**Nova feature - Versao: 1.0.0**")
+    st.markdown("**Nova feature - Versao: 1.0.10**")
     st.markdown(
         "Faca o upload do(s) **relatorio(s) PDF** e da(s) **planilha(s) de "
         "comissoes (XLSX)**. O sistema vai cruzar os clientes com comissao "
@@ -73,13 +117,16 @@ def render() -> None:
         "- Outros vendedores -> coluna **COMISSAO VENDEDOR** (ou variantes)"
     )
     st.info(
-        "Linhas com qualquer anomalia (valor negativo, apolice diferente, "
-        "erro de digitacao, valor ausente) aparecem em laranja na planilha "
-        "de saida com o motivo na ultima coluna."
+        "Linhas com qualquer anomalia (valor negativo, valor zero, coluna "
+        "ausente, apolice diferente/ausente, erro de digitacao, duplicidade "
+        "ou valor ausente) aparecem em laranja na planilha de saida com o "
+        "motivo na ultima coluna."
     )
 
     if "new_output_bytes" not in st.session_state:
         st.session_state.new_output_bytes = None
+    if "new_input_signature" not in st.session_state:
+        st.session_state.new_input_signature = None
 
     col_pdf, col_xlsx = st.columns(2)
     with col_pdf:
@@ -97,8 +144,13 @@ def render() -> None:
             key="new_xlsx_uploader",
         )
 
-    if not pdf_files or not xlsx_files:
+    current_input_signature = (
+        _uploaded_files_signature(pdf_files),
+        _uploaded_files_signature(xlsx_files),
+    )
+    if current_input_signature != st.session_state.new_input_signature:
         st.session_state.new_output_bytes = None
+        st.session_state.new_input_signature = current_input_signature
 
     if st.button(
         "Gerar relatorio Suelane",
@@ -116,7 +168,7 @@ def render() -> None:
                 for idx, pdf_file in enumerate(pdf_files):
                     pdf_path = os.path.join(tmp_dir, f"input_{idx}.pdf")
                     with open(pdf_path, "wb") as f:
-                        f.write(pdf_file.read())
+                        f.write(_uploaded_file_bytes(pdf_file))
                     try:
                         records = extract_negative_commission_records(pdf_path)
                     except Exception as e:
@@ -139,9 +191,10 @@ def render() -> None:
             all_xlsx_warnings = []
             with st.spinner(f"Lendo {len(xlsx_files)} planilha(s)..."):
                 for idx, xlsx_file in enumerate(xlsx_files):
-                    xlsx_path = os.path.join(tmp_dir, f"input_{idx}.xlsx")
+                    suffix = _spreadsheet_suffix(xlsx_file)
+                    xlsx_path = os.path.join(tmp_dir, f"input_{idx}{suffix}")
                     with open(xlsx_path, "wb") as f:
-                        f.write(xlsx_file.read())
+                        f.write(_uploaded_file_bytes(xlsx_file))
                     try:
                         records, warnings = extract_client_vendor_pairs_suelane(
                             xlsx_path
@@ -183,16 +236,11 @@ def render() -> None:
                 st.error("Nenhum registro pode ser cruzado. Relatorio nao gerado.")
                 st.stop()
 
-            # Resumo das anomalias antes de gerar o XLSX
-            anomalias = 0
-            for r in matched_records:
-                valor = get_valor_estorno(r)
-                if (
-                    r.match_type != "EXATO"
-                    or valor is None
-                    or (valor is not None and valor < 0)
-                ):
-                    anomalias += 1
+            # Resumo das anomalias antes de gerar o XLSX.
+            # Usa a mesma regra que pinta linhas no report_builder_suelane.
+            anomalias = sum(
+                1 for r in matched_records if analyze_record_suelane(r)[1]
+            )
 
             st.info(
                 f"{len(matched_records)} linha(s) gerada(s). "

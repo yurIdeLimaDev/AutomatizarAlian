@@ -5,6 +5,7 @@ estrutura do Streamlit eh redesenhada para conviver com o menu inicial.
 """
 
 import os
+import hashlib
 import sys
 import tempfile
 
@@ -20,6 +21,37 @@ from pdf_parser import extract_negative_commission_records  # noqa: E402
 from report_builder import build_report  # noqa: E402
 from vendor_sales_counter import count_sales_per_vendor_month  # noqa: E402
 from xlsx_parser import extract_client_vendor_pairs  # noqa: E402
+
+
+def _spreadsheet_suffix(uploaded_file) -> str:
+    suffix = os.path.splitext(getattr(uploaded_file, "name", "") or "")[1].lower()
+    if suffix in (".xlsx", ".xls"):
+        return suffix
+    return ".xlsx"
+
+
+def _uploaded_files_signature(files) -> tuple:
+    if not files:
+        return ()
+
+    def _digest(file) -> str | None:
+        getvalue = getattr(file, "getvalue", None)
+        if not callable(getvalue):
+            return None
+        try:
+            return hashlib.sha256(getvalue()).hexdigest()
+        except Exception:
+            return None
+
+    return tuple(
+        (
+            getattr(file, "name", ""),
+            getattr(file, "size", None),
+            getattr(file, "type", ""),
+            _digest(file),
+        )
+        for file in files
+    )
 
 
 def render() -> None:
@@ -39,6 +71,8 @@ def render() -> None:
     # Estado isolado por feature
     if "old_output_bytes" not in st.session_state:
         st.session_state.old_output_bytes = None
+    if "old_input_signature" not in st.session_state:
+        st.session_state.old_input_signature = None
 
     col_pdf, col_xlsx = st.columns(2)
     with col_pdf:
@@ -56,8 +90,13 @@ def render() -> None:
             key="old_xlsx_uploader",
         )
 
-    if not pdf_files or not xlsx_files:
+    current_input_signature = (
+        _uploaded_files_signature(pdf_files),
+        _uploaded_files_signature(xlsx_files),
+    )
+    if current_input_signature != st.session_state.old_input_signature:
         st.session_state.old_output_bytes = None
+        st.session_state.old_input_signature = current_input_signature
 
     if st.button(
         "Gerar relatorio",
@@ -122,7 +161,8 @@ def render() -> None:
             all_xlsx_warnings = []
             with st.spinner(f"Lendo {len(xlsx_files)} planilha(s)..."):
                 for idx, xlsx_file in enumerate(xlsx_files):
-                    xlsx_path = os.path.join(tmp_dir, f"input_{idx}.xlsx")
+                    suffix = _spreadsheet_suffix(xlsx_file)
+                    xlsx_path = os.path.join(tmp_dir, f"input_{idx}{suffix}")
                     with open(xlsx_path, "wb") as f:
                         f.write(xlsx_file.read())
 

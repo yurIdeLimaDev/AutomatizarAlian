@@ -1,19 +1,11 @@
 """
-Responsabilidade: montar o XLSX de saida do novo fluxo (estornos Suelane).
+Responsabilidade: montar o XLSX de saida do fluxo Estornos Suelane.
 
-Estetica espelha o sistema antigo (titulo do mes, cabecalho cinza, total
-amarelo, aba NAO ENCONTRADOS).
-
-Diferencas:
-  - O valor da coluna VALOR ESTORNO eh o valor extraido do XLSX original
-    (COM CORRETORA se vendedor = SUELANE, ou COMISSAO VENDEDOR caso contrario).
-  - Linhas com qualquer anomalia ficam pintadas de laranja claro, com o motivo
-    descrito na coluna OBSERVACAO. Sao anomalias:
-      * Valor negativo na coluna fonte
-      * Apolice diferente entre PDF e XLSX
-      * Match aproximado pelo nome (fuzzy / erro de digitacao)
-      * Apolice ausente na planilha
-      * Valor da coluna fonte ausente
+Diferencas em relacao ao sistema antigo:
+  - O valor da coluna VALOR ESTORNO vem do XLSX original.
+  - Para vendedor SUELANE, usa COM CORRETORA.
+  - Para os demais vendedores, usa COMISSAO VENDEDOR.
+  - Linhas com anomalias ficam em laranja e recebem motivo em OBSERVACAO.
 """
 
 import os
@@ -35,6 +27,7 @@ from estorno_suelane.matcher_suelane import (
     MatchedRecordSuelane,
     get_coluna_origem,
     get_valor_estorno,
+    is_coluna_origem_encontrada,
 )
 
 
@@ -62,6 +55,12 @@ _MONTHS_PT = {
 }
 
 
+def _safe_upper(value) -> str:
+    if value is None:
+        return ""
+    return str(value).upper()
+
+
 def _current_month_label() -> str:
     now = datetime.now()
     year_short = str(now.year)[2:]
@@ -73,15 +72,19 @@ def _build_observation(
     valor: Optional[float],
 ) -> tuple[List[str], bool]:
     """
-    Retorna (motivos, deve_pintar_laranja). Mesmo quando ha valor valido,
-    se houver alguma anomalia, retornamos deve_pintar_laranja=True.
+    Retorna (motivos, deve_pintar_laranja).
+
+    Esta funcao eh a regra central de anomalias do fluxo Suelane.
     """
     motivos: List[str] = []
 
-    # 1) Match aproximado / apolice problematica - reaproveita os match_types
+    if not record.apolice_pdf:
+        motivos.append("APOLICE AUSENTE NO PDF - MATCH FEITO APENAS PELO NOME")
+
     if record.match_type == "APOLICE_DIFERENTE":
         motivos.append(
-            f"APOLICE DIFERENTE (PDF: {record.apolice_pdf} | XLSX: {record.apolice_xlsx})"
+            f"APOLICE DIFERENTE (PDF: {record.apolice_pdf} | "
+            f"XLSX: {record.apolice_xlsx})"
         )
     elif record.match_type == "FUZZY_APOLICE_DIFERENTE":
         motivos.append(
@@ -94,16 +97,46 @@ def _build_observation(
         motivos.append("APOLICE AUSENTE NA PLANILHA")
     elif record.match_type == "FUZZY_APOLICE_AUSENTE_XLSX":
         motivos.append("MATCH APROXIMADO E APOLICE AUSENTE NA PLANILHA")
+    elif record.match_type != "EXATO":
+        motivos.append(f"MATCH NAO EXATO ({record.match_type})")
 
-    # 2) Valor da coluna fonte
+    if record.xlsx_duplicate_count > 1:
+        if record.xlsx_duplicate_value_conflict:
+            motivos.append(
+                "DUPLICIDADE NA PLANILHA COM VALORES DIVERGENTES "
+                f"({record.xlsx_duplicate_count} linhas para o mesmo "
+                "cliente/vendedor/aba/apolice)"
+            )
+        else:
+            motivos.append(
+                "DUPLICIDADE NA PLANILHA "
+                f"({record.xlsx_duplicate_count} linhas para o mesmo "
+                "cliente/vendedor/aba/apolice)"
+            )
+
     fonte = get_coluna_origem(record)
-    if valor is None:
+    if not is_coluna_origem_encontrada(record):
+        motivos.append(
+            f"COLUNA '{fonte}' NAO ENCONTRADA NA ABA '{record.sheet_name}'"
+        )
+    elif valor is None:
         motivos.append(f"VALOR AUSENTE NA COLUNA '{fonte}'")
+    elif valor == 0:
+        motivos.append(f"VALOR ZERO NA COLUNA '{fonte}'")
     elif valor < 0:
         motivos.append(f"VALOR NEGATIVO NA COLUNA '{fonte}'")
 
-    deve_pintar = len(motivos) > 0
-    return motivos, deve_pintar
+    return motivos, bool(motivos)
+
+
+def analyze_record_suelane(record: MatchedRecordSuelane) -> tuple[List[str], bool]:
+    """
+    Analise publica de anomalias usada pelo report e pela UI.
+
+    Mantem a contagem exibida no Streamlit identica ao que sera pintado em
+    laranja no XLSX.
+    """
+    return _build_observation(record, get_valor_estorno(record))
 
 
 def _write_title_row(ws, label: str) -> None:
@@ -128,10 +161,10 @@ def _write_data_rows(ws, records: List[MatchedRecordSuelane]) -> None:
         valor = get_valor_estorno(record)
         fonte = get_coluna_origem(record)
 
-        ws.cell(row=row_idx, column=1, value=record.segurado.upper())
+        ws.cell(row=row_idx, column=1, value=_safe_upper(record.segurado))
         ws.cell(row=row_idx, column=2, value="ESTORNO")
-        ws.cell(row=row_idx, column=3, value=record.sheet_name.upper())
-        ws.cell(row=row_idx, column=4, value=record.vendedor.upper())
+        ws.cell(row=row_idx, column=3, value=_safe_upper(record.sheet_name))
+        ws.cell(row=row_idx, column=4, value=_safe_upper(record.vendedor))
         ws.cell(row=row_idx, column=5, value=record.apolice_pdf)
         ws.cell(row=row_idx, column=6, value=fonte)
 
@@ -139,8 +172,7 @@ def _write_data_rows(ws, records: List[MatchedRecordSuelane]) -> None:
         valor_cell.number_format = 'R$ #,##0.00'
 
         motivos, deve_pintar = _build_observation(record, valor)
-        obs_text = " | ".join(motivos)
-        ws.cell(row=row_idx, column=8, value=obs_text)
+        ws.cell(row=row_idx, column=8, value=" | ".join(motivos))
 
         if deve_pintar:
             for col in range(1, num_cols + 1):
@@ -184,7 +216,7 @@ def _write_not_found_sheet(wb, not_found: List[PDFRecord]) -> None:
         cell.alignment = Alignment(horizontal="center")
 
     for row_idx, rec in enumerate(not_found, start=2):
-        c1 = ws.cell(row=row_idx, column=1, value=rec.segurado.upper())
+        c1 = ws.cell(row=row_idx, column=1, value=_safe_upper(rec.segurado))
         c1.font = Font(name=_FONT_NAME)
 
         c2 = ws.cell(row=row_idx, column=2, value=rec.inicio_vig)
