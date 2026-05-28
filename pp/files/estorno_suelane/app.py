@@ -48,7 +48,7 @@ def _render_menu() -> None:
 
     with col_a:
         with st.container(border=True):
-            st.subheader("Sistema antigo")
+            st.subheader("Gerador de Planilhas")
             st.markdown(
                 "**Gerador de Controle de Estornos**\n\n"
                 "Cruza PDFs com comissao negativa contra "
@@ -66,7 +66,7 @@ def _render_menu() -> None:
 
     with col_b:
         with st.container(border=True):
-            st.subheader("Nova feature")
+            st.subheader("Estorno Suelane")
             st.markdown(
                 "**Estornos Suelane**\n\n"
                 "Cruza PDFs com a planilha (incluindo a Suelane) e calcula o "
