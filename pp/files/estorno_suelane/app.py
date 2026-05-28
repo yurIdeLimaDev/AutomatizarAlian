@@ -38,7 +38,7 @@ def _go_to(page: str) -> None:
 def _render_menu() -> None:
     st.title("Controle de Estornos - Menu")
     st.markdown(
-        "Escolha qual fluxo deseja utilizar. O sistema antigo continua "
+        "Escolha qual fluxo deseja utilizar. O Gerador de Planilhas continua "
         "funcionando exatamente como antes; o novo fluxo trata os estornos "
         "da Suelane com base nas colunas de comissao da planilha."
     )
@@ -51,12 +51,12 @@ def _render_menu() -> None:
             st.subheader("Sistema antigo")
             st.markdown(
                 "**Gerador de Controle de Estornos**\n\n"
-                "Fluxo original: cruza PDFs com comissao negativa contra "
-                "planilhas de comissoes e gera o controle com valor fixo "
-                "(R$ 30 ou R$ 50) por linha."
+                "Cruza PDFs com comissao negativa contra "
+                "planilhas de comissoes e gera os estornos - sem suelane "
+                "($30 ou $50) por linha com base nas vendas do mês."
             )
             st.button(
-                "Abrir sistema antigo",
+                "Gerador de Controle de Estornos",
                 key="menu_old_btn",
                 type="primary",
                 use_container_width=True,
@@ -75,7 +75,7 @@ def _render_menu() -> None:
                 "(demais vendedores)."
             )
             st.button(
-                "Abrir nova feature",
+                "Abrir Estorno Suelane",
                 key="menu_new_btn",
                 type="primary",
                 use_container_width=True,
