@@ -53,7 +53,7 @@ def _render_menu() -> None:
                 "**Gerador de Controle de Estornos**\n\n"
                 "Cruza PDFs com comissao negativa contra "
                 "planilhas de comissoes e gera os estornos - sem suelane "
-                "($30 ou $50) por linha com base nas vendas do mês."
+                "(30 ou 50) por linha com base nas vendas do mês."
             )
             st.button(
                 "Gerador de Controle de Estornos",
