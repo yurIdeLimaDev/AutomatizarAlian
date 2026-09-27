@@ -1,0 +1,26 @@
+{
+  "name": "automatizaralian-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "prepare:runtime": "node scripts/prepare-runtime.mjs",
+    "dev": "npm run prepare:runtime && vite --host 127.0.0.1",
+    "build": "npm run prepare:runtime && tsc --noEmit && vite build && node scripts/check-dist.mjs",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node scripts/test.mjs",
+    "test:e2e": "playwright test",
+    "format:check": "prettier --check src scripts tests/*.mjs tests/e2e *.json *.ts index.html"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "fflate": "0.8.3",
+    "prettier": "3.9.9",
+    "pyodide": "314.0.7",
+    "typescript": "5.9.3",
+    "vite": "8.3.1"
+  }
+}

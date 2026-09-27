@@ -1,0 +1,21 @@
+AutomatizarAlian
+Copyright (c) 2026 Yuri de Lima. License: MIT (AutomatizarAlian-MIT.txt).
+Source: https://github.com/yurIdeLimaDev/AutomatizarAlian
+
+Pyodide 314.0.7, unmodified runtime. Mozilla Public License 2.0.
+License: pyodide-MPL-2.0.txt
+Complete corresponding source: https://github.com/pyodide/pyodide/tree/314.0.7
+Build recipes for packaged dependencies: https://github.com/pyodide/pyodide/tree/314.0.7/packages
+
+CPython 3.14.2. Python Software Foundation license and historical licenses.
+License: python-3.14.2.txt
+Source: https://github.com/python/cpython/tree/v3.14.2
+
+Python packages are redistributed with their original license/metadata files
+inside /python/application.zip and the dependency wheels in /runtime/.
+Exact versions and source checksums: /python/manifest.json and /runtime/pyodide-lock.json.
+
+RapidFuzz: official Python fallback only; native platform binaries are omitted.
+pdfplumber: original text/table extraction; the application supplies an explicit
+unsupported-raster-rendering adapter for the unused pypdfium2 import.
+No upstream pdfplumber or pdfminer extraction code is modified.
