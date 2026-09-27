@@ -21,7 +21,14 @@ scope.onmessage = async ({ data }: MessageEvent<Request>) => {
     if (!manifestResponse.ok)
       throw new Error('Não foi possível carregar os componentes da aplicação.');
     const manifest = await manifestResponse.json();
-    await py.loadPackage(manifest.packages, { messageCallback: () => {}, errorCallback: () => {} });
+    // Install dependencies before their dependants. Concurrent WASM dynamic
+    // linking can stall in WebKit even after every wheel has downloaded.
+    for (const [index, name] of manifest.packages.entries()) {
+      progress(
+        `Carregando componentes de processamento (${index + 1}/${manifest.packages.length})…`,
+      );
+      await py.loadPackage(name, { messageCallback: () => {}, errorCallback: console.error });
+    }
     const bundleResponse = await fetch(new URL('python/application.zip', origin));
     if (!bundleResponse.ok) throw new Error('Não foi possível carregar o motor de relatórios.');
     const bundle = await bundleResponse.arrayBuffer();

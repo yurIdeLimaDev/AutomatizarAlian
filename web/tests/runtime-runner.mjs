@@ -6,7 +6,7 @@ self.onmessage = async ({ data }) => {
     if (data.type === 'init') {
       py = await loadPyodide({ indexURL: '/runtime/' });
       const manifest = await (await fetch('/python/manifest.json')).json();
-      await py.loadPackage(manifest.packages);
+      for (const name of manifest.packages) await py.loadPackage(name);
       py.unpackArchive(await (await fetch('/python/application.zip')).arrayBuffer(), 'zip', {
         extractDir: '/app',
       });

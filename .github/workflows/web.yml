@@ -36,8 +36,8 @@ jobs:
       - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm test
       - run: npm run test:e2e -- --project=chromium --project=firefox --project=webkit
-      - name: Verify repeated WebKit reloads and downloads
-        run: npm run test:e2e -- tests/e2e/smoke.spec.ts --project=webkit --repeat-each=3
+      - name: Verify repeated WebKit startup, cancellation and downloads
+        run: npm run test:e2e -- --project=webkit --repeat-each=3
       - run: npm audit --audit-level=moderate
       - uses: actions/upload-artifact@v4
         if: failure()

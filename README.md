@@ -4,6 +4,8 @@ Geração de controles de estornos a partir de relatórios PDF de repasse e plan
 
 ## Versão Web / Cloudflare Pages
 
+Endereço de produção: [automatizaralian.pages.dev](https://automatizaralian.pages.dev).
+
 Nova interface em `web/`, com os dois fluxos: **Gerador de Planilhas** e **Estorno Suelane**.
 O processamento Python acontece dentro do navegador por WebAssembly (Pyodide), sem servidor Python e sem upload de documentos.
 

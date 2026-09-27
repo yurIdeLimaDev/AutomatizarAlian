@@ -58,7 +58,11 @@ Os testes de interface cobrem download, privacidade de rede, cancelamento, remo�
 
 ## Cloudflare Pages
 
-Integração Git com `yurIdeLimaDev/AutomatizarAlian`:
+Projeto `automatizaralian`, endereço de produção [automatizaralian.pages.dev](https://automatizaralian.pages.dev).
+
+A conexão nativa com `yurIdeLimaDev/AutomatizarAlian` está configurada: commits em `main` publicam produção; outras branches geram previews. A primeira validação pública foi feita por Direct Upload, antes de conectar o repositório.
+
+Configuração para a integração Git:
 
 | Configuração | Valor |
 |---|---|
@@ -71,7 +75,17 @@ Integração Git com `yurIdeLimaDev/AutomatizarAlian`:
 
 Nenhum binding ou recurso adicional é necessário. Não crie pasta `functions`, `_worker.js`, nem habilite Web Analytics para esta aplicação. `_headers` define a política de segurança; a mesma política é aplicada no preview local usado pelos testes.
 
-O workflow `.github/workflows/web.yml` valida a referência Python, os navegadores e as dependências. Para atualizar, altere o código, execute os testes, abra um PR e aguarde a validação antes de integrar em `main`. O Pages publica automaticamente os commits de produção. A versão Streamlit continua disponível com seu deploy atual.
+O workflow `.github/workflows/web.yml` valida a referência Python, os navegadores e as dependências. Para atualizar, altere o código, execute os testes, abra um PR e aguarde a validação antes de integrar em `main`. O Pages publica os commits de produção automaticamente. A versão Streamlit continua disponível com seu deploy atual.
+
+Para publicar manualmente um build validado, entre na conta Cloudflare pelo Wrangler e execute, dentro de `web/`:
+
+```bash
+npx wrangler@4.142.0 login
+npm run build
+npx wrangler@4.142.0 pages deploy dist --project-name automatizaralian --branch main
+```
+
+Use `--branch nome-da-branch` para gerar um preview. Só publique `main` depois que os testes passarem. Não armazene credenciais no repositório. Consulte o [procedimento oficial de Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/).
 
 Em caso de regressão, use o rollback para um deployment anterior no painel Pages e reverta o commit correspondente no GitHub. O rollback do site não altera a versão Streamlit.
 

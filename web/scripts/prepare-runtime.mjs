@@ -54,8 +54,8 @@ function include(name) {
   if (required.has(name)) return;
   const p = lock.packages[name];
   if (!p) throw new Error(`Pacote ausente do Pyodide: ${name}`);
-  required.add(name);
   for (const dep of p.depends) include(dep);
+  required.add(name);
 }
 const packages = ['pandas', 'pillow', 'cryptography'];
 packages.forEach(include);
@@ -137,7 +137,7 @@ await writeFile(
   JSON.stringify(
     {
       pyodide: pkg.version,
-      packages,
+      packages: [...required],
       sourceHashes: sources,
       applicationSha256: sha(bundle),
       wheels: wheelLock.map(({ name, version }) => ({ name, version })),
