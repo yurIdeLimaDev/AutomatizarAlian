@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+web/node_modules/
+web/dist/
+web/public/runtime/
+web/public/python/
+web/.cache/
+web/test-results/
+web/playwright-report/
+web/tests/generated/
