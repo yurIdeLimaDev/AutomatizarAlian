@@ -1,12 +1,15 @@
 name: Web - parity and browsers
 on:
   push:
-    branches: [main, codex/cloudflare-pages]
+    branches: [main]
     paths: ['web/**', 'pp/files/**/*.py', 'pp/tabelas teste/**', 'pp/exemplo 2/**', '.github/workflows/web.yml']
   pull_request:
     paths: ['web/**', 'pp/files/**/*.py', 'pp/tabelas teste/**', 'pp/exemplo 2/**', '.github/workflows/web.yml']
 permissions:
   contents: read
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   verify:
     runs-on: ubuntu-latest

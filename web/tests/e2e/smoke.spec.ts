@@ -7,6 +7,8 @@ test('gera e baixa ambos os relatórios sem enviar documentos', async ({
   const unexpected: string[] = [];
   const errors: string[] = [];
   context.on('request', (request) => {
+    // Edge's built-in download panel is browser UI, not an outbound request.
+    if (['edge:', 'chrome:', 'devtools:'].includes(new URL(request.url()).protocol)) return;
     if (
       request.method() !== 'GET' ||
       request.postData() ||
