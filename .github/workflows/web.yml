@@ -37,3 +37,11 @@ jobs:
       - run: npm test
       - run: npm run test:e2e -- --project=chromium --project=firefox --project=webkit
       - run: npm audit --audit-level=moderate
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-diagnostics
+          path: |
+            web/test-results/smoke-*/
+            web/test-results/interaction-*/
+          retention-days: 3

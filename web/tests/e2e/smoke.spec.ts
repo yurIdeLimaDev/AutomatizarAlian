@@ -1,5 +1,17 @@
 import { test, expect } from '@playwright/test';
 import path from 'node:path';
+
+test.afterEach(async ({ page }, info) => {
+  if (info.status !== info.expectedStatus) {
+    console.log(
+      'Final UI status:',
+      await page
+        .locator('#status')
+        .textContent()
+        .catch(() => 'page unavailable'),
+    );
+  }
+});
 test('gera e baixa ambos os relatórios sem enviar documentos', async ({
   page,
   context,
@@ -35,7 +47,7 @@ test('gera e baixa ambos os relatórios sem enviar documentos', async ({
       .getByLabel('Planilhas de comissões', { exact: true })
       .setInputFiles(path.resolve('../pp/tabelas teste/cenario1_xlsx.xlsx'));
     await page.getByRole('button', { name: 'Gerar relatório', exact: true }).click();
-    await expect(page.getByText('Relatório gerado com sucesso.', { exact: true })).toBeVisible();
+    await expect(page.locator('#status')).toHaveText('Relatório gerado com sucesso.');
     const downloadPromise = page.waitForEvent('download');
     await page.getByRole('link', { name: /Baixar .*xlsx/ }).click();
     const download = await downloadPromise;
